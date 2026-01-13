@@ -1,23 +1,16 @@
-from flask import Flask
 import os
 
-def get_secret(secret_name):
-    # 1. Najpierw próbujemy Docker Secrets (plik)
-    try:
-        with open(f'/run/secrets/{secret_name}', 'r') as file:
-            return file.read().strip()
-    except IOError:
-        # 2. Jak nie ma pliku, szukamy w zmiennych (dla kompatybilności)
-        key = os.environ.get(secret_name.upper())
-        if key:
-            return key
-            
-    # 3. Jeśli nigdzie nie ma klucza - STOP! Nie uruchamiaj aplikacji
-    raise ValueError(f"CRITICAL ERROR: No Secret '{secret_name}'!")
+from flask import Flask
+
+from utils import get_secret
+from models import db, User
+from crypto_utils import hash_password, verify_password, generate_key_pair
 
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = get_secret('flask_key_file')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('SQLALCHEMY_DATABASE_URI', 'sqlite:///app.db')
+
 
 @app.route('/')
 def hello():
