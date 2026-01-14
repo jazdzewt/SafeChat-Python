@@ -7,16 +7,25 @@ from flask import Flask, render_template, request, redirect, url_for, flash, ses
 from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 
 from config import Config
 from models import db, User
 from forms import RegistrationForm, LoginForm
-from crypto_utils import hash_password, generate_key_pair, encrypt_data
+from crypto_utils import hash_password, verify_password, generate_key_pair, encrypt_data, decrypt_data, decrypt_private_key
 
 app = Flask(__name__)
 app.config.from_object(Config)
 db.init_app(app)
 csrf = CSRFProtect(app)
+
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(user_id)
 '''
 limiter = Limiter(
     get_remote_address,
@@ -31,6 +40,7 @@ with app.app_context():
     except Exception as e:
         print(f"Database already exists or another process created it: {e}")
 
+# Do usuniecia!!!!!!!!!!!!!!
 @app.route('/')
 def hello():
     return "<h1>Hello World!!!</h1>"
@@ -97,22 +107,57 @@ def register():
                 
             except Exception as e:
                 db.session.rollback()
-                flash(f'Wystąpił błąd podczas rejestracji: {str(e)}', 'danger')
+                flash(f'Wystąpił błąd podczas rejestracji.', 'danger')
                 print(f"Error during registration: {e}")
             
     # Jeśli walidacja nie przeszła, Flask sam wyświetli błędy w HTML
     return render_template('register.html', form=form)
 
 @app.route('/login', methods=['GET', 'POST'])
-def login():  # <--- Ta nazwa 'login' jest kluczowa, jej szuka url_for
+def login():
     form = LoginForm()
     
     if form.validate_on_submit():
-        # Tutaj dodamy logikę sprawdzania hasła za chwilę
-        # Na razie niech po prostu wyświetli, że formularz przesłano
-        flash('Próba logowania...', 'info')
+        user = User.query.filter_by(username=form.username.data).first()
+        
+        # 1. Weryfikacja czy user istnieje
+        if user:
+            # 2. Weryfikacja hasła (Argon2)
+            if verify_password(user.password_hash, form.password.data):
+                
+                # 3. Odszyfrowanie sekretu 2FA hasłem użytkownika
+                decrypted_totp_secret = decrypt_data(bytes.fromhex(user.encrypted_totp_secret), form.password.data)
+                
+                if decrypted_totp_secret:
+                    # 4. Weryfikacja kodu TOTP
+                    totp = pyotp.TOTP(decrypted_totp_secret)
+                    if totp.verify(form.totp_code.data):
+                        # SUKCES - Logowanie
+                        login_user(user)
+                        flash('Zalogowano pomyślnie!', 'success')
+                        return redirect(url_for('dashboard'))
+                    else:
+                        flash('Nieprawidłowy kod 2FA.', 'danger')
+                else:
+                    flash('Błąd deszyfrowania danych (wewnętrzny błąd spójności).', 'danger')
+            else:
+                 flash('Nieprawidłowy login lub hasło.', 'danger')
+        else:
+             flash('Nieprawidłowy login lub hasło.', 'danger')
         
     return render_template('login.html', form=form)
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    return render_template('dashboard.html', name=current_user.username)
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash('Wylogowano.', 'info')
+    return redirect(url_for('login'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

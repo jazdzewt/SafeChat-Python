@@ -35,6 +35,13 @@
             {% endfor %}
         </div>
 
+        <div>
+            {{ form.totp_code.label }}: {{ form.totp_code(size=30, placeholder="Np. 123456") }}
+            {% for error in form.totp_code.errors %}
+            <span style="color: red;">[{{ error }}]</span>
+            {% endfor %}
+        </div>
+
         <div>{{ form.submit() }}</div>
     </form>
 

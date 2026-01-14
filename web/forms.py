@@ -14,8 +14,7 @@ class RegistrationForm(FlaskForm):
         Regexp(r'^.*[a-z].*$', message="Hasło musi zawierać co najmniej jedną małą literę"),
         Regexp(r'^.*[A-Z].*$', message="Hasło musi zawierać co najmniej jedną wielką literę"),
         Regexp(r'^.*[0-9].*$', message="Hasło musi zawierać co najmniej jedną cyfrę"),
-        Regexp(r'^.*[\W_].*$', message="Hasło musi zawierać co najmniej jeden znak specjalny")
-    ])
+        Regexp(r'^.*[\W_].*$', message="Hasło musi zawierać co najmniej jeden znak specjalny")])
 
     confirm_password = PasswordField('Powtórz hasło', validators=[
         DataRequired(),
@@ -26,4 +25,5 @@ class RegistrationForm(FlaskForm):
 class LoginForm(FlaskForm):
     username = StringField('Login', validators=[DataRequired()])
     password = PasswordField('Hasło', validators=[DataRequired()])
+    totp_code = StringField('Kod 2FA (6 cyfr)', validators=[DataRequired(), Length(min=6, max=6)])
     submit = SubmitField('Zaloguj się')
