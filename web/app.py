@@ -46,7 +46,7 @@ def hello():
     return "<h1>Hello World!!!</h1>"
 
 @app.route('/register', methods=['GET', 'POST'])
-#@limiter.limit("10 per day")
+#@limiter.limit("5 per day")
 def register():
     form = RegistrationForm()
     
@@ -134,12 +134,12 @@ def login():
                     if totp.verify(form.totp_code.data):
                         # SUKCES - Logowanie
                         login_user(user)
-                        flash('Zalogowano pomyślnie!', 'success')
+                        #flash('Zalogowano pomyślnie!', 'success')
                         return redirect(url_for('dashboard'))
                     else:
                         flash('Nieprawidłowy kod 2FA.', 'danger')
                 else:
-                    flash('Błąd deszyfrowania danych (wewnętrzny błąd spójności).', 'danger')
+                    flash('Błąd 2FA.', 'danger')
             else:
                  flash('Nieprawidłowy login lub hasło.', 'danger')
         else:

@@ -4,6 +4,7 @@ from flask_login import UserMixin
 
 db = SQLAlchemy()
 
+# Dziedziczy po 2 klasach
 class User(UserMixin, db.Model):
     # Zmieniamy Integer na String(36)
     # default=... generuje losowe UUID przy tworzeniu nowego usera
