@@ -116,3 +116,76 @@ def decrypt_data(encrypted_data: bytes, password: str) -> str:
     except Exception as e:
         print(f"Decryption failed: {e}")
         return None
+
+
+# ==============================================================================
+
+def encrypt_aes_gcm(key: bytes,plaintext: bytes):
+    """
+    Szyfruje dane algorytmem AES-GCM.
+    Zwraca: (ciphertext, nonce, tag, session_key)
+    """
+    session_key = key #os.urandom(32) # 256-bit AES key
+    nonce = os.urandom(12) # 96-bit nonce for GCM
+    
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.backends import default_backend
+
+    cipher = Cipher( algorithms.AES(session_key), modes.GCM(nonce), backend=default_backend() )
+    encryptor = cipher.encryptor()
+    
+    ciphertext = encryptor.update(plaintext) + encryptor.finalize()
+    
+    return ciphertext, nonce, encryptor.tag, session_key
+
+def encrypt_rsa(public_key_pem: str, data: bytes) -> bytes:
+    """
+    Szyfruje dane (np. klucz sesyjny 32B) kluczem PUBLICZNYM (PEM).
+    Używa OAEP + MGF1 + SHA256 (standard).
+    """
+    public_key = serialization.load_pem_public_key(public_key_pem.encode())
+    
+    encrypted = public_key.encrypt(
+        data,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    return encrypted
+
+def sign_rsa(private_key, data: bytes) -> bytes:
+    """
+    Podpisuje dane (np. hash wiadomości) kluczem PRYWATNYM.
+    Używa PSS + MGF1 + SHA256.
+    """
+    signature = private_key.sign(
+        data,
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.MAX_LENGTH
+        ),
+        hashes.SHA256()
+    )
+    return signature
+
+def verify_signature_rsa(public_key_pem: str, data: bytes, signature: bytes) -> bool:
+    """
+    Weryfikuje podpis danych kluczem PUBLICZNYM.
+    """
+    try:
+        public_key = serialization.load_pem_public_key(public_key_pem.encode())
+        public_key.verify(
+            signature,
+            data,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        return True
+    except Exception as e:
+        print(f"Signature verification failed: {e}")
+        return False

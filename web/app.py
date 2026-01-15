@@ -10,9 +10,9 @@ from flask_limiter.util import get_remote_address
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 
 from config import Config
-from models import db, User
-from forms import RegistrationForm, LoginForm
-from crypto_utils import hash_password, verify_password, generate_key_pair, encrypt_data, decrypt_data, decrypt_private_key
+from models import db, User, Message
+from forms import RegistrationForm, LoginForm, MessageForm
+from crypto_utils import hash_password, verify_password, generate_key_pair, encrypt_data, decrypt_data, decrypt_private_key, encrypt_aes_gcm, encrypt_rsa, sign_rsa
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -147,10 +147,24 @@ def login():
         
     return render_template('login.html', form=form)
 
+# ==============================================================================
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    return render_template('dashboard.html', name=current_user.username)
+    # Pobierz wiadomości dla zalogowanego użytkownika
+    received_messages = Message.query.filter_by(receiver_id=current_user.id).order_by(Message.timestamp.desc()).all()
+    # Pobierz nazwy nadawców
+    messages_data = []
+    for msg in received_messages:
+        sender = User.query.get(msg.sender_id)
+        messages_data.append({
+            'sender': sender.username if sender else "Nieznany",
+            'timestamp': msg.timestamp,
+            'id': msg.id,
+            'is_read': msg.is_read
+        })
+    return render_template('dashboard.html', name=current_user.username, messages=messages_data)
+# ==============================================================================
 
 @app.route('/logout')
 @login_required
@@ -158,6 +172,84 @@ def logout():
     logout_user()
     flash('Wylogowano.', 'info')
     return redirect(url_for('login'))
+
+# ==============================================================================
+@app.route('/send', methods=['GET', 'POST'])
+@login_required
+def send_message():
+    form = MessageForm()
+    # Populate the recipient choices dynamically
+    users = User.query.all()
+    # Exclude current user from choices
+    form.recipient.choices = [(u.id, u.username) for u in users if u.id != current_user.id]
+
+    if form.validate_on_submit():
+        recipient_id = form.recipient.data
+        content = form.content.data.encode('utf-8')
+        password = form.password_confirm.data
+        
+        # 1. Verify password & Unlock Private Key (Sender)
+        if not verify_password(current_user.password_hash, password):
+             flash('Nieprawidłowe hasło (potrzebne do podpisu).', 'danger')
+             return render_template('create_message.html', form=form)
+        
+        try:
+             # Decrypt Sender's Private Key
+             sender_priv_key_pem_enc = current_user.encrypted_private_key # stored as text
+             
+             sender_priv_key_obj = decrypt_private_key(sender_priv_key_pem_enc.encode('utf-8'), password)
+             if not sender_priv_key_obj:
+                 flash('Błąd dekodowania klucza prywatnego.', 'danger')
+                 return render_template('create_message.html', form=form)
+
+             # 2. Get Recipient Public Key
+             recipient = User.query.get(recipient_id)
+             if not recipient:
+                  flash('Użytkownik nie istnieje.', 'danger')
+                  return render_template('create_message.html', form=form)
+             
+             recipient_pub_key_pem = recipient.public_key
+             
+             session_key = os.urandom(32) # 256-bit AES key
+             # 3. Encrypt Body (AES)
+             ciphertext, nonce, tag, session_key = encrypt_aes_gcm(session_key, content)
+             
+             # 4. Encrypt Session Key for Recipient (RSA)
+             enc_key_recipient = encrypt_rsa(recipient_pub_key_pem, session_key)
+             
+             # 5. Encrypt Session Key for Sender (RSA)
+             sender_pub_key_pem = current_user.public_key
+             enc_key_sender = encrypt_rsa(sender_pub_key_pem, session_key)
+             
+             # 6. Sign the Ciphertext (nonce + ciphertext + tag)
+             sign_data = nonce + ciphertext + tag
+             signature = sign_rsa(sender_priv_key_obj, sign_data)
+             
+             # 7. Save to DB
+             msg = Message(
+                 sender_id=current_user.id,
+                 receiver_id=recipient_id,
+                 encrypted_body=ciphertext,
+                 nonce=nonce,
+                 tag=tag,
+                 enc_session_key_recipient=enc_key_recipient,
+                 enc_session_key_sender=enc_key_sender,
+                 signature=signature
+             )
+             db.session.add(msg)
+             db.session.commit()
+             
+             flash('Wiadomość wysłana!', 'success')
+             return redirect(url_for('dashboard'))
+
+        except Exception as e:
+            flash('Błąd wysyłania!', 'danger')
+            print(f"Error sending message: {e}")
+            db.session.rollback()
+            
+    return render_template('create_message.html', form=form)
+
+# ==============================================================================
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

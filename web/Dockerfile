@@ -19,4 +19,5 @@ COPY . .
 # Najpierw naprawiamy uprawnienia (jako root), potem przełączamy użytkownika (gosu) i uruchamiamy serwer
 
 #CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:5000", "app:app"]
-CMD ["sh", "-c", "mkdir -p /app/instance && chown -R appuser:appuser /app/instance && exec gosu appuser gunicorn -w 4 -b 0.0.0.0:5000 app:app"]
+#CMD ["sh", "-c", "mkdir -p /app/instance && chown -R appuser:appuser /app/instance && exec gosu appuser gunicorn -w 4 -b 0.0.0.0:5000 app:app"]
+CMD ["sh", "-c", "chown -R appuser:appuser /app/instance && exec gosu appuser gunicorn -w 4 -b 0.0.0.0:5000 app:app"]

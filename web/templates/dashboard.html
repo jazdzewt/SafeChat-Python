@@ -3,16 +3,66 @@
 
 <head>
     <title>Panel Użytkownika</title>
+
 </head>
 
 <body>
-    <h1>Witaj, {{ name }}!</h1>
+    <div class="container">
+        <h1>Witaj, {{ name }}!</h1>
 
-    <p>To jest bezpieczny panel użytkownika.</p>
-    <p>Aplikacja do wiadomości jest w trakcie budowy.</p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
 
-    <hr>
-    <a href="{{ url_for('logout') }}">Wyloguj się</a>
+        <p>To jest Twój bezpieczny panel.</p>
+
+        <div style="margin-bottom: 20px;">
+            <a href="{{ url_for('send_message') }}" class="btn">Napisz nową wiadomość</a>
+        </div>
+
+        <h2>Odebrane wiadomości</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Nadawca</th>
+                    <th>Temat</th>
+                    <th>Data</th>
+                    <th>Status</th>
+                    <th>Akcja</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for msg in messages %}
+                <tr>
+                    <td>{{ msg.sender }}</td>
+                    <td>{{ msg.topic }}</td>
+                    <td>{{ msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td>
+                        {% if msg.is_read %}
+                        <span style="color: gray;">Przeczytana</span>
+                        {% else %}
+                        <span style="color: green; font-weight: bold;">NOWA</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <!-- Link do odczytu wiadomości (można dodać później) -->
+                        <span>(Brak podglądu)</span>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="4">Brak wiadomości.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <hr>
+        <a href="{{ url_for('logout') }}">Wyloguj się</a>
 </body>
 
 </html>

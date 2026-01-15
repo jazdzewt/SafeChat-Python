@@ -1,6 +1,8 @@
 import uuid  # <--- Dodaj ten import na samej górze
+from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
+from sqlalchemy.orm import deferred
 
 db = SQLAlchemy()
 
@@ -17,3 +19,42 @@ class User(UserMixin, db.Model):
     encrypted_private_key = db.Column(db.Text, nullable=False)
 
     encrypted_totp_secret = db.Column(db.String(300), nullable=True) # Zwiększamy length dla encrypted data
+
+# ==============================================================================
+class Message(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    topic = db.Column(db.String(150), nullable=False)
+    sender_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False)
+    receiver_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # --- WARSTWA 1: TREŚĆ (Szyfrowanie Symetryczne AES) ---
+    # Treść wiadomości zaszyfrowana losowym kluczem AES
+    encrypted_body = db.Column(db.LargeBinary, nullable=False)
+    
+    # Nonce (IV) potrzebny do AES-GCM (nie musi być tajny, ale musi być unikalny)
+    body_nonce = db.Column(db.LargeBinary, nullable=False)
+    
+    # Tag autentyczności (GCM auth tag) - gwarantuje, że nikt nie zmienił bitów w encrypted_body
+    tag = db.Column(db.LargeBinary, nullable=False)
+
+    # --- WARSTWA 2: KLUCZE (Szyfrowanie Asymetryczne RSA) ---
+    # Klucz AES zaszyfrowany Kluczem Publicznym ODBIORCY
+    # (Dzięki temu tylko Odbiorca otworzy tę wiadomość)
+    enc_session_key_recipient = db.Column(db.LargeBinary, nullable=False)
+
+    # Klucz AES zaszyfrowany Kluczem Publicznym NADAWCY
+    # (To jest "Pro Tip": bez tego Nadawca nie mógłby przeczytać własnej wiadomości w folderze "Wysłane")
+    enc_session_key_sender = db.Column(db.LargeBinary, nullable=False)
+
+    # --- WARSTWA 3: AUTENTYCZNOŚĆ (Podpis Cyfrowy) ---
+    # Hash wiadomości podpisany Kluczem Prywatnym NADAWCY
+    # (Dowód, że to naprawdę on wysłał, a nie serwer sfałszował wiadomość)
+    signature = db.Column(db.LargeBinary, nullable=False)
+
+    # Statusy
+    is_read = db.Column(db.Boolean, default=False)
+
+    encrypted_attachment_blob = deferred(db.Column(db.LargeBinary, nullable=True))# BLOB
+    attachment_filename = db.Column(db.String(255), nullable=True)
+    attachment_nonce = db.Column(db.LargeBinary, nullable=True)
