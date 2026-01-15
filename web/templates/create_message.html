@@ -16,7 +16,7 @@
     {% endif %}
     {% endwith %}
 
-    <form method="POST">
+    <form method="POST" enctype="multipart/form-data">
         {{ form.hidden_tag() }}
 
         <div class="form-group">
@@ -40,6 +40,14 @@
             {{ form.content }}
             {% if form.content.errors %}
             <span style="color: red;">{{ form.content.errors[0] }}</span>
+            {% endif %}
+        </div>
+
+        <div class="form-group">
+            {{ form.file.label }}
+            {{ form.file }}
+            {% if form.file.errors %}
+            <span style="color: red;">{{ form.file.errors[0] }}</span>
             {% endif %}
         </div>
 

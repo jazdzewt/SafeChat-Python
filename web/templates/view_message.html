@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Wiadomość</title>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Wiadomość od: {{ sender_name }}</h1>
+        <p><a href="{{ url_for('dashboard') }}">Powrót do panelu</a></p>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+
+        <div class="message-meta">
+            <p><strong>Temat:</strong> {{ msg.topic }}</p>
+            <p><strong>Data:</strong> {{ msg.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        </div>
+
+        <hr>
+
+        {% if decrypted_body %}
+        <div class="message-body">
+            <h3>Treść wiadomości:</h3>
+            <pre style="background: #f0f0f0; padding: 10px; border-radius: 5px;">{{ decrypted_body }}</pre>
+        </div>
+
+        {% if decrypted_file_name %}
+        <div class="attachment-section">
+            <h3>Załącznik:</h3>
+            <p>Plik: <strong>{{ decrypted_file_name }}</strong></p>
+
+            <form action="{{ url_for('download_attachment', message_id=msg.id) }}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label for="password">Podaj hasło, aby pobrać i odszyfrować:</label>
+                <br>
+                <input type="password" name="password" required>
+                <button type="submit">Pobierz</button>
+            </form>
+        </div>
+        {% endif %}
+
+        {% else %}
+        <div class="decrypt-form">
+            <h3>Wiadomość jest zaszyfrowana.</h3>
+            <form method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label for="password">Podaj swoje hasło do konta:</label>
+                <br>
+                <input type="password" name="password" required>
+                <button type="submit">Odszyfrowuj</button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+</body>
+
+</html>

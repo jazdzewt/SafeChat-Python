@@ -120,12 +120,12 @@ def decrypt_data(encrypted_data: bytes, password: str) -> str:
 
 # ==============================================================================
 
-def encrypt_aes_gcm(key: bytes,plaintext: bytes):
+def encrypt_aes_gcm(session_key: bytes,plaintext: bytes):
     """
     Szyfruje dane algorytmem AES-GCM.
     Zwraca: (ciphertext, nonce, tag, session_key)
     """
-    session_key = key #os.urandom(32) # 256-bit AES key
+    #session_key = key #os.urandom(32) # 256-bit AES key
     nonce = os.urandom(12) # 96-bit nonce for GCM
     
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -187,5 +187,32 @@ def verify_signature_rsa(public_key_pem: str, data: bytes, signature: bytes) -> 
         )
         return True
     except Exception as e:
-        print(f"Signature verification failed: {e}")
+        print(f"Signature verification failed!")
         return False
+
+def decrypt_aes_gcm(session_key: bytes, ciphertext: bytes, nonce: bytes, tag: bytes) -> bytes:
+    """
+    Odszyfrowuje dane algorytmem AES-GCM.
+    """
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.backends import default_backend
+
+    cipher = Cipher(algorithms.AES(session_key), modes.GCM(nonce, tag), backend=default_backend())
+    decryptor = cipher.decryptor()
+    
+    return decryptor.update(ciphertext) + decryptor.finalize()
+
+def decrypt_rsa(private_key, ciphertext: bytes) -> bytes:
+    """
+    Odszyfrowuje dane (np. klucz sesyjny) używając klucza PRYWATNEGO.
+    Używa OAEP + MGF1 + SHA256.
+    """
+    plaintext = private_key.decrypt(
+        ciphertext,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    return plaintext

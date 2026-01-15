@@ -1,5 +1,5 @@
 from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField, SubmitField, TextAreaField, SelectField
+from wtforms import StringField, PasswordField, SubmitField, TextAreaField, SelectField, FileField, SelectMultipleField
 from wtforms.validators import DataRequired, Length, EqualTo, Regexp
 
 class RegistrationForm(FlaskForm):
@@ -31,8 +31,9 @@ class LoginForm(FlaskForm):
 # ==============================================================================
 
 class MessageForm(FlaskForm):
-    recipient = SelectField('Odbiorca', coerce=str, validators=[DataRequired()])
+    recipient = SelectMultipleField('Odbiorcy', coerce=str, validators=[DataRequired()])
     topic = StringField('Temat', validators=[DataRequired(), Length(min=10, max=150, message="Temat musi mieć od 10 do 150 znaków")])
     content = TextAreaField('Treść wiadomości', validators=[DataRequired(), Length(min=1, max=5000)])
+    file = FileField('Załącznik (opcjonalnie)')
     password_confirm = PasswordField('Potwierdź hasło (do podpisu)', validators=[DataRequired()])
     submit = SubmitField('Wyślij wiadomość')

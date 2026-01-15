@@ -1,9 +1,10 @@
 import io
+import os
 import base64
 import pyotp
 import qrcode
 
-from flask import Flask, render_template, request, redirect, url_for, flash, session
+from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, abort, make_response
 from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -12,7 +13,8 @@ from flask_login import LoginManager, login_user, logout_user, login_required, c
 from config import Config
 from models import db, User, Message
 from forms import RegistrationForm, LoginForm, MessageForm
-from crypto_utils import hash_password, verify_password, generate_key_pair, encrypt_data, decrypt_data, decrypt_private_key, encrypt_aes_gcm, encrypt_rsa, sign_rsa
+from utils import validate_file
+from crypto_utils import hash_password, verify_password, generate_key_pair, encrypt_data, decrypt_data, decrypt_private_key, encrypt_aes_gcm, encrypt_rsa, sign_rsa, decrypt_aes_gcm, decrypt_rsa
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -161,6 +163,7 @@ def dashboard():
             'sender': sender.username if sender else "Nieznany",
             'timestamp': msg.timestamp,
             'id': msg.id,
+            'topic': msg.topic,
             'is_read': msg.is_read
         })
     return render_template('dashboard.html', name=current_user.username, messages=messages_data)
@@ -174,6 +177,7 @@ def logout():
     return redirect(url_for('login'))
 
 # ==============================================================================
+
 @app.route('/send', methods=['GET', 'POST'])
 @login_required
 def send_message():
@@ -184,7 +188,11 @@ def send_message():
     form.recipient.choices = [(u.id, u.username) for u in users if u.id != current_user.id]
 
     if form.validate_on_submit():
-        recipient_id = form.recipient.data
+        recipient_ids = form.recipient.data
+        if not recipient_ids:
+             flash('Musisz wybrać co najmniej jednego odbiorcę.', 'warning')
+             return render_template('create_message.html', form=form)
+
         content = form.content.data.encode('utf-8')
         password = form.password_confirm.data
         
@@ -202,54 +210,182 @@ def send_message():
                  flash('Błąd dekodowania klucza prywatnego.', 'danger')
                  return render_template('create_message.html', form=form)
 
-             # 2. Get Recipient Public Key
-             recipient = User.query.get(recipient_id)
-             if not recipient:
-                  flash('Użytkownik nie istnieje.', 'danger')
-                  return render_template('create_message.html', form=form)
-             
-             recipient_pub_key_pem = recipient.public_key
-             
+             # 2. Prepare Encryption (ONCE for all recipients)
              session_key = os.urandom(32) # 256-bit AES key
-             # 3. Encrypt Body (AES)
+             
+             # Encrypt Body (AES)
              ciphertext, nonce, tag, session_key = encrypt_aes_gcm(session_key, content)
              
-             # 4. Encrypt Session Key for Recipient (RSA)
-             enc_key_recipient = encrypt_rsa(recipient_pub_key_pem, session_key)
-             
-             # 5. Encrypt Session Key for Sender (RSA)
-             sender_pub_key_pem = current_user.public_key
-             enc_key_sender = encrypt_rsa(sender_pub_key_pem, session_key)
-             
-             # 6. Sign the Ciphertext (nonce + ciphertext + tag)
+             # Sign the Ciphertext (nonce + ciphertext + tag)
              sign_data = nonce + ciphertext + tag
              signature = sign_rsa(sender_priv_key_obj, sign_data)
              
-             # 7. Save to DB
-             msg = Message(
-                 sender_id=current_user.id,
-                 receiver_id=recipient_id,
-                 encrypted_body=ciphertext,
-                 nonce=nonce,
-                 tag=tag,
-                 enc_session_key_recipient=enc_key_recipient,
-                 enc_session_key_sender=enc_key_sender,
-                 signature=signature
-             )
-             db.session.add(msg)
-             db.session.commit()
+             # Obsługa załącznika (jeśli jest) - również raz
+             attachment_blob = None
+             attachment_filename = None
+             attachment_nonce = None
+             attachment_tag = None
+
+             if form.file.data:
+                 file_storage = form.file.data
+                 clean_filename = validate_file(file_storage)
+                 if clean_filename is False:
+                      flash('Niedozwolone rozszerzenie pliku!', 'danger')
+                      return render_template('create_message.html', form=form)
+                 
+                 if clean_filename:
+                      file_bytes = file_storage.read()
+                      # Szyfrowanie pliku TYM SAMYM kluczem sesyjnym (session_key)
+                      # Generujemy nowy nonce dla pliku
+                      att_ciphertext, att_nonce, att_tag, _ = encrypt_aes_gcm(session_key, file_bytes)
+                      
+                      attachment_blob = att_ciphertext
+                      attachment_filename = clean_filename
+                      attachment_nonce = att_nonce
+                      attachment_tag = att_tag
+
+             # 3. Loop through Recipients and Save Messages
+             sent_count = 0
+             for r_id in recipient_ids:
+                 recipient = User.query.get(r_id)
+                 if not recipient:
+                     continue
+
+                 recipient_pub_key_pem = recipient.public_key
+                 
+                 # Encrypt Session Key for THIS Recipient (RSA)
+                 enc_key_recipient = encrypt_rsa(recipient_pub_key_pem, session_key)
+                 
+                 msg = Message(
+                     sender_id=current_user.id,
+                     receiver_id=recipient.id,
+                     topic=form.topic.data,
+                     encrypted_body=ciphertext,
+                     body_nonce=nonce,                 
+                     tag=tag,
+                     enc_session_key_recipient=enc_key_recipient,
+                     signature=signature,                 
+                     encrypted_attachment_blob=attachment_blob,
+                     attachment_filename=attachment_filename,
+                     attachment_nonce=attachment_nonce,
+                     attachment_tag=attachment_tag
+                 )
+                 db.session.add(msg)
+                 sent_count += 1
              
-             flash('Wiadomość wysłana!', 'success')
-             return redirect(url_for('dashboard'))
+             if sent_count > 0:
+                 db.session.commit()
+                 flash(f'Wiadomość wysłana do {sent_count} odbiorców!', 'success')
+                 return redirect(url_for('dashboard'))
+             else:
+                 flash('Nie udało się wysłać wiadomości do żadnego odbiorcy.', 'warning')
 
         except Exception as e:
-            flash('Błąd wysyłania!', 'danger')
+            flash(f'Błąd wysyłania! {e}', 'danger')
             print(f"Error sending message: {e}")
             db.session.rollback()
             
     return render_template('create_message.html', form=form)
 
 # ==============================================================================
+
+@app.route('/view_message/<string:message_id>', methods=['GET', 'POST'])
+@login_required
+def view_message(message_id):
+    msg = Message.query.get_or_404(message_id)
+    
+    if msg.receiver_id != current_user.id:
+         # Sender can view the page but NOT decrypt the content
+         abort(403)
+
+    sender = User.query.get(msg.sender_id)
+    sender_name = sender.username if sender else "Nieznany"
+    
+    decrypted_body = None
+    decrypted_file_name = None
+    
+    if request.method == 'POST':
+        # Only receiver can decrypt
+        if msg.receiver_id != current_user.id:
+             flash('Tylko odbiorca może odszyfrować wiadomość.', 'danger')
+        else:
+            password = request.form.get('password')
+            if not password:
+                flash('Podaj hasło.', 'danger')
+            else:
+                if not verify_password(current_user.password_hash, password):
+                    flash('Nieprawidłowe hasło.', 'danger')
+                else:
+                    try:
+                        # Decrypt Private Key
+                        priv_key_pem_enc = current_user.encrypted_private_key
+                        priv_key_obj = decrypt_private_key(priv_key_pem_enc.encode('utf-8'), password)
+                        
+                        if not priv_key_obj:
+                             flash('Błąd dekodowania klucza prywatnego.', 'danger')
+                        else:
+                            # Decrypt Session Key (Only Recipient)
+                            enc_session_key = msg.enc_session_key_recipient
+                                
+                            session_key = decrypt_rsa(priv_key_obj, enc_session_key)
+                            
+                            # Decrypt Body
+                            decrypted_body = decrypt_aes_gcm(session_key, msg.encrypted_body, msg.body_nonce, msg.tag).decode('utf-8')
+                            
+                            if msg.encrypted_attachment_blob:
+                                 decrypted_file_name = msg.attachment_filename
+
+                            # Mark as read if receiver
+                            if not msg.is_read:
+                                msg.is_read = True
+                                db.session.commit()
+                                
+                    except Exception as e:
+                        flash(f'Błąd deszyfrowania: {e}', 'danger')
+
+    return render_template('view_message.html', msg=msg, sender_name=sender_name, decrypted_body=decrypted_body, decrypted_file_name=decrypted_file_name)
+
+@app.route('/download_attachment/<string:message_id>', methods=['POST'])
+@login_required
+def download_attachment(message_id):
+    msg = Message.query.get_or_404(message_id)
+    if msg.receiver_id != current_user.id:
+        abort(403)
+        
+    if not msg.encrypted_attachment_blob:
+        flash('Ta wiadomość nie ma załącznika.', 'warning')
+        return redirect(url_for('view_message', message_id=message_id))
+
+    password = request.form.get('password')
+    if not password:
+         flash('Podaj hasło aby pobrać plik.', 'danger')
+         return redirect(url_for('view_message', message_id=message_id))
+         
+    if not verify_password(current_user.password_hash, password):
+        flash('Nieprawidłowe hasło.', 'danger')
+        return redirect(url_for('view_message', message_id=message_id))
+        
+    try:
+        priv_key_pem_enc = current_user.encrypted_private_key
+        priv_key_obj = decrypt_private_key(priv_key_pem_enc.encode('utf-8'), password)
+        
+        # Only receiver can download
+        enc_session_key = msg.enc_session_key_recipient
+            
+        session_key = decrypt_rsa(priv_key_obj, enc_session_key)
+        
+        file_bytes = decrypt_aes_gcm(session_key, msg.encrypted_attachment_blob, msg.attachment_nonce, msg.attachment_tag)
+        
+        return send_file(
+            io.BytesIO(file_bytes),
+            as_attachment=True,
+            download_name=msg.attachment_filename,
+            mimetype='application/octet-stream'
+        )
+        
+    except Exception as e:
+        flash(f'Błąd pobierania: {e}', 'danger')
+        return redirect(url_for('view_message', message_id=message_id))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)

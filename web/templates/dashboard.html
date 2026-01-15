@@ -49,8 +49,7 @@
                         {% endif %}
                     </td>
                     <td>
-                        <!-- Link do odczytu wiadomości (można dodać później) -->
-                        <span>(Brak podglądu)</span>
+                        <a href="{{ url_for('view_message', message_id=msg.id) }}">Otwórz</a>
                     </td>
                 </tr>
                 {% else %}

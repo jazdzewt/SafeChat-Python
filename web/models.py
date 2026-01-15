@@ -17,44 +17,37 @@ class User(UserMixin, db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     public_key = db.Column(db.Text, nullable=False)
     encrypted_private_key = db.Column(db.Text, nullable=False)
-
     encrypted_totp_secret = db.Column(db.String(300), nullable=True) # Zwiększamy length dla encrypted data
 
-# ==============================================================================
 class Message(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
+    #id = db.Column(db.Integer, primary_key=True)
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     topic = db.Column(db.String(150), nullable=False)
     sender_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False)
     receiver_id = db.Column(db.String(36), db.ForeignKey('user.id'), nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-    
+    is_read = db.Column(db.Boolean, default=False)
     # --- WARSTWA 1: TREŚĆ (Szyfrowanie Symetryczne AES) ---
     # Treść wiadomości zaszyfrowana losowym kluczem AES
-    encrypted_body = db.Column(db.LargeBinary, nullable=False)
+    encrypted_body = deferred(db.Column(db.LargeBinary, nullable=False))
     
     # Nonce (IV) potrzebny do AES-GCM (nie musi być tajny, ale musi być unikalny)
-    body_nonce = db.Column(db.LargeBinary, nullable=False)
+    body_nonce = deferred(db.Column(db.LargeBinary, nullable=False))
     
     # Tag autentyczności (GCM auth tag) - gwarantuje, że nikt nie zmienił bitów w encrypted_body
-    tag = db.Column(db.LargeBinary, nullable=False)
+    tag = deferred(db.Column(db.LargeBinary, nullable=False))
 
     # --- WARSTWA 2: KLUCZE (Szyfrowanie Asymetryczne RSA) ---
     # Klucz AES zaszyfrowany Kluczem Publicznym ODBIORCY
     # (Dzięki temu tylko Odbiorca otworzy tę wiadomość)
-    enc_session_key_recipient = db.Column(db.LargeBinary, nullable=False)
-
-    # Klucz AES zaszyfrowany Kluczem Publicznym NADAWCY
-    # (To jest "Pro Tip": bez tego Nadawca nie mógłby przeczytać własnej wiadomości w folderze "Wysłane")
-    enc_session_key_sender = db.Column(db.LargeBinary, nullable=False)
+    enc_session_key_recipient = deferred(db.Column(db.LargeBinary, nullable=False))
 
     # --- WARSTWA 3: AUTENTYCZNOŚĆ (Podpis Cyfrowy) ---
     # Hash wiadomości podpisany Kluczem Prywatnym NADAWCY
     # (Dowód, że to naprawdę on wysłał, a nie serwer sfałszował wiadomość)
-    signature = db.Column(db.LargeBinary, nullable=False)
-
-    # Statusy
-    is_read = db.Column(db.Boolean, default=False)
+    signature = deferred(db.Column(db.LargeBinary, nullable=False))
 
     encrypted_attachment_blob = deferred(db.Column(db.LargeBinary, nullable=True))# BLOB
-    attachment_filename = db.Column(db.String(255), nullable=True)
-    attachment_nonce = db.Column(db.LargeBinary, nullable=True)
+    attachment_filename = deferred(db.Column(db.String(255), nullable=True))
+    attachment_nonce = deferred(db.Column(db.LargeBinary, nullable=True))
+    attachment_tag = deferred(db.Column(db.LargeBinary, nullable=True))
