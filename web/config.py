@@ -9,5 +9,7 @@ class Config:
     SESSION_COOKIE_SECURE = True
     SESSION_COOKIE_SAMESITE = 'Lax'
     WTF_CSRF_TIME_LIMIT = 3600
+    WTF_CSRF_SSL_STRICT = True
     PERMANENT_SESSION_LIFETIME = timedelta(minutes=60)
     MAX_CONTENT_LENGTH = 10 * 1024 * 1024 # 10 MB limit
+

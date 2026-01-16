@@ -1,4 +1,5 @@
-import os 
+import os
+import uuid 
 from werkzeug.utils import secure_filename
 from wtforms.validators import ValidationError
 
@@ -41,3 +42,10 @@ def validate_file_size(form, field):
         file.seek(0)
         if size > max_mb * 1024 * 1024:
             raise ValidationError(f'Plik "{file.filename}" jest za duży (max {max_mb}MB).')
+
+def validate_uuid(uuid_string):
+    try:
+        uuid.UUID(uuid_string)
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False

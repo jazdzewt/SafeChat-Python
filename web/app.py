@@ -3,8 +3,10 @@ import os
 import base64
 import pyotp
 import qrcode
+import time
+import random
 
-from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, abort, make_response
+from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, abort #, make_response
 from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -14,7 +16,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from config import Config
 from models import db, User, Message, Attachment
 from forms import RegistrationForm, LoginForm, MessageForm
-from utils import validate_file
+from utils import validate_file, validate_uuid
 from crypto_utils import hash_password, verify_password, generate_key_pair, encrypt_totp, decrypt_totp, decrypt_private_key, encrypt_aes_gcm, encrypt_rsa, sign_rsa, decrypt_aes_gcm, decrypt_rsa, verify_signature_rsa
 
 app = Flask(__name__)
@@ -48,7 +50,7 @@ with app.app_context():
     try:
         db.create_all()
     except Exception as e:
-        print(f"Database already exists or another process created it: {e}")
+        print("Database already exists or another process created it!")
 
 # Do usuniecia!!!!!!!!!!!!!!
 @app.route('/')
@@ -115,14 +117,17 @@ def register():
                 flash('Konto założone!', 'success')
                 
                 # Renderujemy stronę sukcesu z kodem QR - NIE PRZEKIEROWUJEMY od razu
+                time.sleep(random.uniform(1.0, 2.0))
                 return render_template('register_success.html', qr_code=qr_b64, secret=totp_secret)
                 
             except Exception as e:
                 db.session.rollback()
-                flash(f'Wystąpił błąd podczas rejestracji.', 'danger')
-                print(f"Error during registration: {e}")
+                flash('Błąd podczas rejestracji!', 'danger')
+                print("Error during registration!")
             
     # Jeśli walidacja nie przeszła, Flask sam wyświetli błędy w HTML
+    time.sleep(random.uniform(1.0, 2.0))
+
     return render_template('register.html', form=form)
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -157,6 +162,9 @@ def login():
                  flash('Nieprawidłowy login lub hasło.', 'danger')
         else:
              flash('Nieprawidłowy login lub hasło.', 'danger')
+        
+        # Opóźnienie odpowiedzi w przypadku niepowodzenia (mitigacja ataków czasowych i brute-force)
+    time.sleep(random.uniform(1.0, 2.0))
         
     return render_template('login.html', form=form)
 
@@ -205,6 +213,9 @@ def send_message():
              flash('Musisz wybrać co najmniej jednego odbiorcę.', 'warning')
              return render_template('create_message.html', form=form)
 
+        if len(recipient_ids) > 5:
+             flash('Możesz wysłać wiadomość do maksymalnie 5 odbiorców.', 'warning')
+             return render_template('create_message.html', form=form)
         content = form.content.data.encode('utf-8')
         password = form.password_confirm.data
         
@@ -233,6 +244,10 @@ def send_message():
 
              # Przygotowanie załączników (raz)
              encrypted_attachments = []
+             if len(form.files.data) > 5:
+                 flash('Możesz wysłać maksymalnie 5 załączników.', 'warning')
+                 return render_template('create_message.html', form=form)
+
              if form.files.data:
                  for file_storage in form.files.data:
                      # Check if file is empty (browser sometimes sends empty field)
@@ -312,8 +327,8 @@ def send_message():
                  flash('Nie udało się wysłać wiadomości do żadnego odbiorcy.', 'warning')
 
         except Exception as e:
-            flash(f'Błąd wysyłania! {e}', 'danger')
-            print(f"Error sending message: {e}")
+            flash('Błąd wysyłania!', 'danger')
+            print("Error sending message!")
             db.session.rollback()
             
     return render_template('create_message.html', form=form)
@@ -323,6 +338,10 @@ def send_message():
 @app.route('/view_message/<string:message_id>', methods=['GET', 'POST'])
 @login_required
 def view_message(message_id):
+
+    if not validate_uuid(message_id):
+        abort(400)
+    
     msg = Message.query.get_or_404(message_id)
     
     # jesli ktos nie jest odbiorca nie widzi strony (błąd 403 http - Forbidden)
@@ -369,13 +388,18 @@ def view_message(message_id):
                                 db.session.commit()
                                 
                     except Exception as e:
-                        flash(f'Błąd deszyfrowania: {e}', 'danger')
+                        flash('Błąd deszyfrowania!', 'danger')
+
+    time.sleep(random.uniform(1.0, 2.0))
 
     return render_template('view_message.html', msg=msg, sender_name=sender_name, decrypted_body=decrypted_body)
 
 @app.route('/verify_signature/<string:message_id>', methods=['POST'])
 @login_required
 def verify_signature(message_id):
+
+    if not validate_uuid(message_id):
+        abort(400)
     msg = Message.query.get_or_404(message_id)
     
     if msg.receiver_id != current_user.id and msg.sender_id != current_user.id:
@@ -404,14 +428,19 @@ def verify_signature(message_id):
             flash('Podpis cyfrowy jest NIEPOPRAWNY! Wiadomość mogła zostać zmodyfikowana.', 'danger')
             
     except Exception as e:
-         print(f"Verification error: {e}")
-         flash(f'Błąd weryfikacji: {e}', 'danger')
+         print("Verification error!")
+         flash('Błąd weryfikacji!', 'danger')
+
+    time.sleep(random.uniform(1.0, 2.0))
 
     return redirect(url_for('view_message', message_id=message_id))
 
 @app.route('/download_attachment/<string:attachment_id>', methods=['POST'])
 @login_required
 def download_attachment(attachment_id):
+
+    if not validate_uuid(attachment_id):
+        abort(400)
     attachment = Attachment.query.get_or_404(attachment_id)
     msg = attachment.message # relation defined in models
     
@@ -425,6 +454,7 @@ def download_attachment(attachment_id):
          
     if not verify_password(current_user.password_hash, password):
         flash('Nieprawidłowe hasło.', 'danger')
+        time.sleep(random.uniform(1.0, 2.0))
         return redirect(url_for('view_message', message_id=msg.id))
         
     try:
@@ -438,6 +468,7 @@ def download_attachment(attachment_id):
         
         file_bytes = decrypt_aes_gcm(session_key, attachment.encrypted_blob, attachment.nonce, attachment.tag)
         
+        time.sleep(random.uniform(1.0, 2.0))
         return send_file(
             io.BytesIO(file_bytes),
             as_attachment=True,
@@ -446,12 +477,15 @@ def download_attachment(attachment_id):
         )
         
     except Exception as e:
-        flash(f'Błąd pobierania: {e}', 'danger')
+        flash('Błąd pobierania!', 'danger')
         return redirect(url_for('view_message', message_id=msg.id))
 
 @app.route('/delete_message/<string:message_id>', methods=['POST'])
 @login_required
 def delete_message(message_id):
+
+    if not validate_uuid(message_id):
+        abort(400)
     msg = Message.query.get_or_404(message_id)
     
     # Security check: Only the receiver can delete (and read)
@@ -472,7 +506,7 @@ def delete_message(message_id):
         
     except Exception as e:
         db.session.rollback()
-        flash(f'Błąd podczas usuwania wiadomości: {e}', 'danger')
+        flash('Błąd podczas usuwania wiadomości!', 'danger')
         return redirect(url_for('view_message', message_id=message_id))
 
 if __name__ == '__main__':
