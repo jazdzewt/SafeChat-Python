@@ -77,7 +77,7 @@ def register():
         # np:
         # Sprawdzenie czy użytkownik już istnieje (SQLAlchemy protect against SQL Injection)
         if User.query.filter_by(username=username).first():
-            flash('Nazwa użytkownika zajęta.', 'danger')
+            flash('Błąd podczas rejestracji!', 'danger')
         else:
             try:
                 # Hashowanie hasła
@@ -188,7 +188,7 @@ def dashboard():
     return render_template('dashboard.html', name=current_user.username, messages=messages_data)
 # ==============================================================================
 
-@app.route('/logout')
+@app.route('/logout', methods=['POST'])
 @login_required
 def logout():
     logout_user()
