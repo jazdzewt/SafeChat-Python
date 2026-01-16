@@ -9,6 +9,7 @@ from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config
 from models import db, User, Message, Attachment
@@ -20,6 +21,13 @@ app = Flask(__name__)
 app.config.from_object(Config)
 db.init_app(app)
 csrf = CSRFProtect(app)
+
+# Konfiguracja ProxyFix, aby Flask ufał nagłówkom z Nginxa (X-Forwarded-Proto itp.)
+# x_for=1 - bierze ostatni adres z listy i uznaje go za adres klienta
+# x_proto=1 - mowi zeby Flask sluchal sie tego https
+# x_host=1 - mowi zeby Flask ufał temu co nginx twierdzi ze jest domeną
+# x_port=1 - mowi zeby Flask ufał temu co nginx twierdzi ze jest portem
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -45,6 +53,8 @@ with app.app_context():
 # Do usuniecia!!!!!!!!!!!!!!
 @app.route('/')
 def hello():
+    print(f"Flask widzi adres: {request.remote_addr}", flush=True)
+    print(f"Nagłówek X-Forwarded-For: {request.headers.get('X-Forwarded-For')}", flush=True)
     return "<h1>Hello World!!!</h1>"
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -116,6 +126,7 @@ def register():
     return render_template('register.html', form=form)
 
 @app.route('/login', methods=['GET', 'POST'])
+#@limiter.limit("10 per hour")
 def login():
     form = LoginForm()
     
@@ -180,6 +191,7 @@ def logout():
 
 @app.route('/send', methods=['GET', 'POST'])
 @login_required
+#@limiter.limit("15 per hour")
 def send_message():
     form = MessageForm()
     # Populate the recipient choices dynamically
@@ -313,22 +325,16 @@ def send_message():
 def view_message(message_id):
     msg = Message.query.get_or_404(message_id)
     
+    # jesli ktos nie jest odbiorca nie widzi strony (błąd 403 http - Forbidden)
     if msg.receiver_id != current_user.id:
-         # Sender can view the page but NOT decrypt the content
          abort(403)
 
     sender = User.query.get(msg.sender_id)
     sender_name = sender.username if sender else "Nieznany"
-    
-    verification_status = None
-    # Auto-verification removed as per user request.
-    # Verification is now manual via /verify_signature/...
 
     decrypted_body = None
-    #decrypted_file_name = None
     
     if request.method == 'POST':
-        # Only receiver can decrypt
         if msg.receiver_id != current_user.id:
              flash('Tylko odbiorca może odszyfrować wiadomość.', 'danger')
         else:
@@ -365,7 +371,7 @@ def view_message(message_id):
                     except Exception as e:
                         flash(f'Błąd deszyfrowania: {e}', 'danger')
 
-    return render_template('view_message.html', msg=msg, sender_name=sender_name, decrypted_body=decrypted_body, verification_status=verification_status)
+    return render_template('view_message.html', msg=msg, sender_name=sender_name, decrypted_body=decrypted_body)
 
 @app.route('/verify_signature/<string:message_id>', methods=['POST'])
 @login_required
@@ -382,15 +388,15 @@ def verify_signature(message_id):
 
     try:
         # Reconstruct what was signed: nonce + ciphertext + tag
-        sign_data = msg.body_nonce + msg.encrypted_body + msg.tag
+        signed_data = msg.body_nonce + msg.encrypted_body + msg.tag
         
         # Sort attachments by TAG to ensure same order as signed
         sorted_attachments = sorted(msg.attachments, key=lambda x: x.tag)
         
         for att in sorted_attachments:
-            sign_data += att.nonce + att.encrypted_blob + att.tag
+            signed_data += att.nonce + att.encrypted_blob + att.tag
         
-        is_valid = verify_signature_rsa(sender.public_key, sign_data, msg.signature)
+        is_valid = verify_signature_rsa(sender.public_key, signed_data, msg.signature)
         
         if is_valid:
             flash('Podpis cyfrowy jest POPRAWNY. Wiadomość jest autentyczna.', 'success')

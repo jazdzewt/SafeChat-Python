@@ -31,11 +31,9 @@
                 </button>
             </form>
 
-            <form action="{{ url_for('delete_message', message_id=msg.id) }}" method="POST" style="margin-top: 10px;"
-                onsubmit="return confirm('Czy na pewno chcesz TRWALE usunąć tę wiadomość i wszystkie załączniki? Tej operacji nie można cofnąć.');">
+            <form action="{{ url_for('delete_message', message_id=msg.id) }}" method="POST" style="margin-top: 10px;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn-delete"
-                    style="background-color: #dc3545; color: white; border: none; padding: 5px 10px; cursor: pointer; border-radius: 4px;">
+                <button type="submit" class="btn-delete">
                     Usuń wiadomość
                 </button>
             </form>
