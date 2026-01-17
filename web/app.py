@@ -5,6 +5,7 @@ import pyotp
 import qrcode
 import time
 import random
+import logging
 
 from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, abort #, make_response
 from flask_wtf.csrf import CSRFProtect
@@ -20,8 +21,12 @@ from utils import validate_file, validate_uuid
 from crypto_utils import hash_password, verify_password, generate_key_pair, encrypt_totp, decrypt_totp, decrypt_private_key, encrypt_aes_gcm, encrypt_rsa, sign_rsa, decrypt_aes_gcm, decrypt_rsa, verify_signature_rsa
 
 app = Flask(__name__)
+# Wczytujemy konfigrację z pliku config.py
 app.config.from_object(Config)
+# Łączymy się z bazą danych
 db.init_app(app)
+# Włączamy ochronę przed CSRF, przy 'POST' sprawdza czy token CSRF jest poprawny (generuje losowy ciag znakow i podpisuje go FLASK_SECRET_KEY), 
+# token znajduję się w ciasteczku oraz w formularzu
 csrf = CSRFProtect(app)
 
 # Konfiguracja ProxyFix, aby Flask ufał nagłówkom z Nginxa (X-Forwarded-Proto itp.)
@@ -31,36 +36,36 @@ csrf = CSRFProtect(app)
 # x_port=1 - mowi zeby Flask ufał temu co nginx twierdzi ze jest portem
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
+# Tworzymy instancję LoginManagera
 login_manager = LoginManager()
+# Inicjalizujemy LoginManagera dla aplikacji
 login_manager.init_app(app)
+# Ustawiamy widok logowania (gdy uzytkownik nie jest zalogowany)
 login_manager.login_view = 'login'
 
+# Definiujemy funkcję, ktora mowi flaskowi kto aktualnie jest zalogowany 
+# przekazuje id uzytkownika do bazy danych i zwraca obiekt uzytkownika
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(user_id)
-'''
 limiter = Limiter(
+    # Uzywamy adresu IP klienta
     get_remote_address,
+    # Przypisujemy do konkretnej instancji Flaska
     app=app,
     default_limits=["200 per day", "50 per hour"],
+    # Domyślnie używamy RAM'u do przechowywania liczników
     storage_uri="memory://"
 )
-'''
 with app.app_context():
     try:
+        # SQLAlchemy tworzy tabele w bazie danych
         db.create_all()
     except Exception as e:
-        print("Database already exists or another process created it!")
-
-# Do usuniecia!!!!!!!!!!!!!!
-@app.route('/')
-def hello():
-    print(f"Flask widzi adres: {request.remote_addr}", flush=True)
-    print(f"Nagłówek X-Forwarded-For: {request.headers.get('X-Forwarded-For')}", flush=True)
-    return "<h1>Hello World!!!</h1>"
+        app.logger.warning(f"Baza danych juz istnieje lub inny proces ją stworzył!: {e}")
 
 @app.route('/register', methods=['GET', 'POST'])
-#@limiter.limit("5 per day")
+@limiter.limit("10 per day")
 def register():
     form = RegistrationForm()
     
@@ -122,16 +127,18 @@ def register():
                 
             except Exception as e:
                 db.session.rollback()
+                app.logger.error(f"Błąd podczas rejestracji: {e}")
                 flash('Błąd podczas rejestracji!', 'danger')
-                print("Error during registration!")
             
     # Jeśli walidacja nie przeszła, Flask sam wyświetli błędy w HTML
     time.sleep(random.uniform(1.0, 2.0))
 
     return render_template('register.html', form=form)
 
+@app.route('/', methods=['GET', 'POST'])
 @app.route('/login', methods=['GET', 'POST'])
-#@limiter.limit("10 per hour")
+@limiter.limit("15 per hour")
+@limiter.limit("60 per day")
 def login():
     form = LoginForm()
     
@@ -168,7 +175,6 @@ def login():
         
     return render_template('login.html', form=form)
 
-# ==============================================================================
 @app.route('/dashboard')
 @login_required
 def dashboard():
@@ -186,7 +192,6 @@ def dashboard():
             'is_read': msg.is_read
         })
     return render_template('dashboard.html', name=current_user.username, messages=messages_data)
-# ==============================================================================
 
 @app.route('/logout', methods=['POST'])
 @login_required
@@ -195,11 +200,11 @@ def logout():
     flash('Wylogowano.', 'info')
     return redirect(url_for('login'))
 
-# ==============================================================================
-
 @app.route('/send', methods=['GET', 'POST'])
 @login_required
-#@limiter.limit("15 per hour")
+@limiter.limit("2 per minute")
+@limiter.limit("15 per hour")
+@limiter.limit("50 per day")
 def send_message():
     form = MessageForm()
     # Populate the recipient choices dynamically
@@ -213,9 +218,7 @@ def send_message():
              flash('Musisz wybrać co najmniej jednego odbiorcę.', 'warning')
              return render_template('create_message.html', form=form)
 
-        if len(recipient_ids) > 5:
-             flash('Możesz wysłać wiadomość do maksymalnie 5 odbiorców.', 'warning')
-             return render_template('create_message.html', form=form)
+
         content = form.content.data.encode('utf-8')
         password = form.password_confirm.data
         
@@ -244,9 +247,7 @@ def send_message():
 
              # Przygotowanie załączników (raz)
              encrypted_attachments = []
-             if len(form.files.data) > 5:
-                 flash('Możesz wysłać maksymalnie 5 załączników.', 'warning')
-                 return render_template('create_message.html', form=form)
+
 
              if form.files.data:
                  for file_storage in form.files.data:
@@ -327,13 +328,11 @@ def send_message():
                  flash('Nie udało się wysłać wiadomości do żadnego odbiorcy.', 'warning')
 
         except Exception as e:
-            flash('Błąd wysyłania!', 'danger')
-            print("Error sending message!")
             db.session.rollback()
+            app.logger.error(f"Błąd wysyłania: {e}")
+            flash('Błąd wysyłania!', 'danger')
             
     return render_template('create_message.html', form=form)
-
-# ==============================================================================
 
 @app.route('/view_message/<string:message_id>', methods=['GET', 'POST'])
 @login_required
@@ -388,6 +387,7 @@ def view_message(message_id):
                                 db.session.commit()
                                 
                     except Exception as e:
+                        app.logger.error(f"Błąd deszyfrowania: {e}")
                         flash('Błąd deszyfrowania!', 'danger')
 
     time.sleep(random.uniform(1.0, 2.0))
@@ -428,7 +428,7 @@ def verify_signature(message_id):
             flash('Podpis cyfrowy jest NIEPOPRAWNY! Wiadomość mogła zostać zmodyfikowana.', 'danger')
             
     except Exception as e:
-         print("Verification error!")
+         app.logger.error(f"Błąd weryfikacji: {e}")
          flash('Błąd weryfikacji!', 'danger')
 
     time.sleep(random.uniform(1.0, 2.0))
@@ -477,6 +477,7 @@ def download_attachment(attachment_id):
         )
         
     except Exception as e:
+        app.logger.error(f"Błąd pobierania: {e}")
         flash('Błąd pobierania!', 'danger')
         return redirect(url_for('view_message', message_id=msg.id))
 
@@ -506,8 +507,11 @@ def delete_message(message_id):
         
     except Exception as e:
         db.session.rollback()
+        app.logger.error(f"Błąd usuwania: {e}")
         flash('Błąd podczas usuwania wiadomości!', 'danger')
         return redirect(url_for('view_message', message_id=message_id))
 
 if __name__ == '__main__':
+    # Defaultowo na stdout, level oznacza ze wyswietlaja sie wszystkie powiadomienia o wyzszym priorytecie (aktualnie bez DEBUG)
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     app.run(host='0.0.0.0', port=5000)
