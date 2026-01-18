@@ -495,8 +495,8 @@ def delete_message(message_id):
         
     try:
         # Manually delete attachments first (safer if no cascade is set)
-        for att in msg.attachments:
-            db.session.delete(att)
+        #for att in msg.attachments:
+        #    db.session.delete(att)
             
         # Delete the message itself
         db.session.delete(msg)

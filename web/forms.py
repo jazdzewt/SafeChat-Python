@@ -32,6 +32,8 @@ class MessageForm(FlaskForm):
         Length(max=5, message="Możesz wysłać wiadomość do maksymalnie 5 odbiorców.")])
     topic = StringField('Temat', validators=[DataRequired(), Length(min=10, max=150, message="Temat musi mieć od 10 do 150 znaków")])
     content = TextAreaField('Treść wiadomości', validators=[DataRequired(), Length(min=1, max=5000)])
+    # render_kw={'multiple': True} pozwala na przesłanie wielu plików. Mówi Flaskowi, 
+    # że ma to być <input type="file" multiple>
     files = MultipleFileField('Załączniki (opcjonalnie)', render_kw={'multiple': True}, validators=[
         validate_file_size,
         Length(max=5, message="Możesz wysłać maksymalnie 5 załączników.")])
