@@ -1,28 +1,26 @@
 services:
-  # Kontener z Aplikacją Python
+  # Kontener z aplikacją
   web:
     build: ./web
     container_name: flask_app
     restart: always
     environment:
-      #- FLASK_SECRET_KEY=${FLASK_SECRET_KEY}
       - SQLALCHEMY_DATABASE_URI=sqlite:////app/instance/app.db
     volumes:
-      - ./web:/app # Hot-reload: zmiany w kodzie widoczne od razu
-      #- app_data:/app/instance # Trwałość bazy danych
-      #Na potrzeby testowania
+      - ./web:/app
+      #- app_data:/app/instance
       - ./web/instance:/app/instance
     secrets:
-      - flask_key_file # Wskazujemy, że ten kontener używa tego sekretu
+      - flask_key_file
 
-  # Kontener Proxy (Brama wejściowa)
+  # Kontener nginx
   nginx:
     build: ./nginx
     container_name: nginx_proxy
     ports:
-      - "443:8443" # Wystawiamy tylko bezpieczny port HTTPS
+      - "443:8443"
     depends_on:
-      - web # Nginx czeka aż Web wstanie
+      - web # Nginx czeka aż web wstanie
   #volumes:
   #app_data:
 
